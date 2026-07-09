@@ -2,7 +2,7 @@ import pyodbc
 
 class Deploy:
 
-    def __init__(self, bak_path, db_name='tmpDatabase', data_dir = r"D:\SQLwork"):
+    def __init__(self, bak_path, db_name='tmpDatabase', data_dir = r"C:\SQLwork"):
         self.bak_path = bak_path
         self.db_name = db_name
         self.data_dir = data_dir
@@ -10,14 +10,14 @@ class Deploy:
 
     def restore_db(self):
 
-        server = r"."
+        server = r".\VDE_SQL_SERVER"
 
         bak_path = self.bak_path
         db_name = self.db_name
         data_dir = self.data_dir
 
         conn = pyodbc.connect(
-            r"DRIVER={SQL Server};"
+            r"DRIVER={ODBC Driver 17 for SQL Server};"
             f"SERVER={server};"
             r"DATABASE=master;"
             r"Trusted_Connection=yes;",
@@ -51,9 +51,9 @@ class Deploy:
         self.current_connection = None
 
     def connect_to_restored(self):
-        server = r"."
+        server = r".\VDE_SQL_SERVER"
         conn = pyodbc.connect(
-            r"DRIVER={SQL Server};"
+            r"DRIVER={ODBC Driver 17 for SQL Server};"
             rf"SERVER={server};"
             rf"DATABASE={self.db_name};"
             r"Trusted_Connection=yes;",
