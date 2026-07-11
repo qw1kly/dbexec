@@ -27,9 +27,20 @@ class Writer:
                 raise e
 
     def sync_dictionaries(self):
-        """Дедупликация предприятий."""
-        print("Синхронизация предприятий (TPLANTS)...")
-        sql = f"""
+        """Дедупликация организаций и предприятий."""
+        print("Синхронизация организаций и предприятий...")
+
+        sql_orgs = f"""
+            INSERT INTO [{self.target_db}].[dbo].[TORGANIZATIONS]
+            SELECT * FROM [{self.source_db}].[dbo].[TORGANIZATIONS] S
+            WHERE NOT EXISTS (
+                SELECT 1 FROM [{self.target_db}].[dbo].[TORGANIZATIONS] T
+                WHERE T.ORGANIZATION_ID = S.ORGANIZATION_ID
+            )
+        """
+        self._execute_sql(sql_orgs, ignore_missing=True)
+
+        sql_plants = f"""
             INSERT INTO [{self.target_db}].[dbo].[TPLANTS] 
                 (PLANT_ID, NAME, CODE, COMMENT, ORDER_NUMBER, ORGANIZATION_ID)
             SELECT S.PLANT_ID, S.NAME, S.CODE, S.COMMENT, S.ORDER_NUMBER, S.ORGANIZATION_ID
@@ -38,7 +49,7 @@ class Writer:
                 SELECT 1 FROM [{self.target_db}].[dbo].[TPLANTS] T WHERE T.NAME = S.NAME
             )
         """
-        self._execute_sql(sql)
+        self._execute_sql(sql_plants)
 
     def sync_topology(self):
         """Ремаппинг цехов на обновленные предприятия."""
@@ -59,13 +70,13 @@ class Writer:
         self._execute_sql(sql_shops)
 
     def sync_equipment(self):
-        """Перенос агрегатов (с учетом ремаппинга цехов) и датчиков."""
-        print("Синхронизация агрегатов и датчиков...")
+        """Перенос агрегатов, узлов (элементов) и датчиков."""
+        print("Синхронизация агрегатов, узлов и датчиков...")
         sql_machines = f"""
             INSERT INTO [{self.target_db}].[dbo].[TMACHINES] 
-                (MACHINE_ID, NAME, SHOP_ID, SERIAL_NUMBER, NUMBER, MACHINE_MODEL_SETTING_ID)
+                (MACHINE_ID, NAME, SHOP_ID, SERIAL_NUMBER, NUMBER, MACHINE_MODEL_SETTING_ID, ORDER_ID)
             SELECT M.MACHINE_ID, M.NAME, T_SHOP.SHOP_ID, 
-                   M.SERIAL_NUMBER, M.NUMBER, M.MACHINE_MODEL_SETTING_ID
+                   M.SERIAL_NUMBER, M.NUMBER, M.MACHINE_MODEL_SETTING_ID, M.ORDER_ID
             FROM [{self.source_db}].[dbo].[TMACHINES] M
             JOIN [{self.source_db}].[dbo].[TSHOPS] S_SHOP ON M.SHOP_ID = S_SHOP.SHOP_ID
             JOIN [{self.source_db}].[dbo].[TPLANTS] S_PLANT ON S_SHOP.PLANT_ID = S_PLANT.PLANT_ID
@@ -79,6 +90,16 @@ class Writer:
         """
         self._execute_sql(sql_machines)
 
+        # переносим узлы (Они зависят от агрегатов, поэтому идут после TMACHINES)
+        sql_elements = f"""
+            INSERT INTO [{self.target_db}].[dbo].[TELEMENTS]
+            SELECT * FROM [{self.source_db}].[dbo].[TELEMENTS]
+            EXCEPT
+            SELECT * FROM [{self.target_db}].[dbo].[TELEMENTS]
+        """
+        self._execute_sql(sql_elements)
+
+        # Перенос точек измерений (Тоже зависят от агрегатов)
         sql_points = f"""
             INSERT INTO [{self.target_db}].[dbo].[TPOINT]
             SELECT * FROM [{self.source_db}].[dbo].[TPOINT]
@@ -94,12 +115,13 @@ class Writer:
             'TUNIT_TYPES', 'TDIRECTION_TYPES', 'TWINDOW_TYPES',
             'TPARAMETER_SETTINGS', 'TPOINT_SETTINGS', 'TCHANNEL_SETTINGS',
             'TMACHINE_MODEL_SETTINGS', 'TELEMENT_MODEL_SETTINGS',
+            'TELEMENT_MODEL_IN_MM_SETTINGS',
             'TREGION_SETTINGS', 'TWAVE_SETTINGS', 'TSPECTRUM_SETTINGS',
-            'TBAND_SETTINGS', 'TELEMENTS', 'TBEARING_SETTINGS'
+            'TBAND_SETTINGS', 'TBEARING_SETTINGS'
+            # УБРАЛИ отсюда 'TELEMENTS'
         ]
 
         for table in settings_tables:
-            # Генерация PK: отбрасываем первую 'T' и последнюю 'S', добавляем '_ID'
             pk_col = table[1:-1] + '_ID'
             sql = f"""
                 INSERT INTO [{self.target_db}].[dbo].[{table}]
@@ -147,11 +169,24 @@ class Writer:
             print(f"    [!] Ошибка при загрузке измерений. Выполнен откат. Ошибка: {e}")
             raise e
 
+    def sync_machine_events(self):
+        """Перенос событий агрегатов (требуется для загрузки измерений)."""
+        print("Синхронизация событий агрегатов...")
+        sql = f"""
+            INSERT INTO [{self.target_db}].[dbo].[TMACHINE_EVENTS]
+            SELECT * FROM [{self.source_db}].[dbo].[TMACHINE_EVENTS] S
+            WHERE NOT EXISTS (
+                SELECT 1 FROM [{self.target_db}].[dbo].[TMACHINE_EVENTS] T
+                WHERE T.MACHINE_EVENT_ID = S.MACHINE_EVENT_ID
+            )
+        """
+        self._execute_sql(sql, ignore_missing=True)
+
     def sync_events_and_files(self):
-        """Синхронизация связей бинарных данных и журнала тревог."""
-        print("Синхронизация связей с бинарными данными...")
+        """Синхронизация связей бинарных данных (спектров)."""
+        print("Синхронизация связей с файлами...")
         tables_pks = {
-            'TMACHINE_EVENTS': 'MACHINE_EVENT_ID',
+            # 'TMACHINE_EVENTS' - мы убрали отсюда, он теперь в отдельном методе
             'TMEASUREMENT_FILES_INFO': 'FILE_INFO_ID',
             'TWAVE_DATA': 'WAVE_DATA_ID',
             'TSYNC_DATA': 'SYNC_DATA_ID'
@@ -216,8 +251,9 @@ class Writer:
         print(f"\n--- СТАРТ ETL-ПРОЦЕССА ({archive_name}) ---")
         self.sync_dictionaries()
         self.sync_topology()
-        self.sync_equipment()
         self.sync_settings_dictionaries()
+        self.sync_equipment()
+        self.sync_machine_events()
         self.sync_measurements_safely()
         self.sync_events_and_files()
         self.extract_wave_files(zip_path)
