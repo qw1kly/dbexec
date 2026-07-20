@@ -1,17 +1,17 @@
--- 1. Общий масштаб инфраструктуры: показывает суммарное количество уникальных предприятий, цехов и агрегатов во всей базе.
+-- 1. суммарное количество уникальных предприятий, цехов и агрегатов
 SELECT
-    COUNT(DISTINCT p.PLANT_ID) AS Total_Enterprises,
-    COUNT(DISTINCT s.SHOP_ID) AS Total_Shops,
-    COUNT(DISTINCT m.MACHINE_ID) AS Total_Machines
+    COUNT(DISTINCT p.NAME) AS Total_Enterprises,
+    COUNT(DISTINCT s.NAME) AS Total_Shops,
+    COUNT(m.NAME) AS Total_Machines
 FROM TPLANTS p
 LEFT JOIN TSHOPS s ON p.PLANT_ID = s.PLANT_ID
 LEFT JOIN TMACHINES m ON s.SHOP_ID = m.SHOP_ID;
 
 
--- 2. Распределение оборудования: выводит список всех предприятий и количество агрегатов, закрепленных за каждым из них (от большего к меньшему).
+-- 2. список предприятий и количество агрегатов на каждом из них
 SELECT
     p.NAME AS Plant_Name,
-    COUNT(m.MACHINE_ID) AS Total_Machines
+    COUNT(m.NAME) AS Total_Machines
 FROM TPLANTS p
 JOIN TSHOPS s ON p.PLANT_ID = s.PLANT_ID
 JOIN TMACHINES m ON s.SHOP_ID = m.SHOP_ID
@@ -19,43 +19,21 @@ GROUP BY p.NAME
 ORDER BY Total_Machines DESC;
 
 
--- 3. Глубина истории и объем данных: показывает общее количество замеров вибрации по каждому предприятию, а также даты самого старого и самого свежего измерения.
+-- 3. общее количество замеров вибрации в базе и даты самого старого и самого свежего измерения
 SELECT
-    p.NAME AS Plant_Name,
-    COUNT(meas.MEASUREMENT_ID) AS Total_Measurements,
-    MIN(meas.MEASURE_TIME) AS Oldest_Record,
-    MAX(meas.MEASURE_TIME) AS Newest_Record
-FROM TPLANTS p
-JOIN TSHOPS s ON p.PLANT_ID = s.PLANT_ID
-JOIN TMACHINES m ON s.SHOP_ID = m.SHOP_ID
-JOIN TPOINT pt ON m.MACHINE_ID = pt.MACHINE_ID
-JOIN TMEASUREMENTS meas ON pt.POINT_ID = meas.POINT_ID
-GROUP BY p.NAME
-ORDER BY Total_Measurements DESC;
+    COUNT(MEASUREMENT_ID) AS Total_Measurements,
+    MIN(MEASURE_TIME) AS Oldest_Record,
+    MAX(MEASURE_TIME) AS Newest_Record
+FROM TMEASUREMENTS;
 
 
--- 4. Статистика инцидентов: определяет топ-10 самых "проблемных" агрегатов, у которых зафиксировано наибольшее количество событий (тревог, предупреждений, смен состояний).
-SELECT TOP 10
-    m.NAME AS Machine_Name,
-    s.NAME AS Shop_Name,
-    p.NAME AS Plant_Name,
-    COUNT(e.MACHINE_EVENT_ID) AS Event_Count
-FROM TMACHINES m
-JOIN TSHOPS s ON m.SHOP_ID = s.SHOP_ID
-JOIN TPLANTS p ON s.PLANT_ID = p.PLANT_ID
-JOIN TMACHINE_EVENTS e ON m.MACHINE_ID = e.MACHINE_ID
-GROUP BY m.NAME, s.NAME, p.NAME
-ORDER BY Event_Count DESC;
-
-
--- 5. Объем спектральных данных: подсчитывает количество прикрепленных файлов осциллограмм (.afdata) и их суммарный вес в мегабайтах.
+-- 4. общее количество прикрепленных файлов осциллограмм (.afdata)
 SELECT
-    COUNT(FILE_INFO_ID) AS Total_Wave_Files,
-    CAST(SUM(FILE_SIZE) / 1024.0 / 1024.0 AS DECIMAL(10,2)) AS Total_Size_MB
+    COUNT(*) AS Total_Wave_Files
 FROM TMEASUREMENT_FILES_INFO;
 
 
--- 6. Интенсивность диагностики: показывает количество фактически снятых числовых значений вибрации (цифр) за конкретный год (например, за 2024-й).
+-- 5. Показывает количество фактически снятых числовых значений вибрации за конкретный год
 SELECT
     COUNT(v.PARAM_VALUE_ID) AS Total_Numeric_Values_2024
 FROM TMEASUREMENTS m
