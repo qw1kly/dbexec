@@ -1,17 +1,17 @@
--- 1. суммарное количество уникальных предприятий, цехов и агрегатов
+-- 1. суммарное количество уникальных предприятий, цехов и агрегатов во всей базе
 SELECT
-    COUNT(DISTINCT p.NAME) AS Total_Enterprises,
-    COUNT(DISTINCT s.NAME) AS Total_Shops,
-    COUNT(m.NAME) AS Total_Machines
+    COUNT(DISTINCT p.PLANT_ID) AS Total_Enterprises,
+    COUNT(DISTINCT s.SHOP_ID) AS Total_Shops,
+    COUNT(DISTINCT m.MACHINE_ID) AS Total_Machines
 FROM TPLANTS p
 LEFT JOIN TSHOPS s ON p.PLANT_ID = s.PLANT_ID
 LEFT JOIN TMACHINES m ON s.SHOP_ID = m.SHOP_ID;
 
 
--- 2. список предприятий и количество агрегатов на каждом из них
+-- 2. выводит список всех предприятий и количество агрегатов, закрепленных за каждым из них (от большего к меньшему)
 SELECT
     p.NAME AS Plant_Name,
-    COUNT(m.NAME) AS Total_Machines
+    COUNT(m.MACHINE_ID) AS Total_Machines
 FROM TPLANTS p
 JOIN TSHOPS s ON p.PLANT_ID = s.PLANT_ID
 JOIN TMACHINES m ON s.SHOP_ID = m.SHOP_ID
@@ -19,21 +19,51 @@ GROUP BY p.NAME
 ORDER BY Total_Machines DESC;
 
 
--- 3. общее количество замеров вибрации в базе и даты самого старого и самого свежего измерения
+-- 3. показывает общее количество замеров вибрации по каждому предприятию, а также даты самого старого и самого свежего измерения
+WITH AllMachinePoints AS (
+    SELECT MACHINE_ID, POINT_ID FROM TORTPOINT_MACHINE_LINKS
+    UNION
+    SELECT MACHINE_ID, POINT_ID FROM TAPFPOINT_MACHINE_LINKS
+    UNION
+    SELECT MACHINE_ID, POINT_ID FROM TBUMPTESTPOINT_MACHINE_LINKS
+    UNION
+    SELECT MACHINE_ID, POINT_ID FROM TLSPOINT_MACHINE_LINKS
+)
 SELECT
-    COUNT(MEASUREMENT_ID) AS Total_Measurements,
-    MIN(MEASURE_TIME) AS Oldest_Record,
-    MAX(MEASURE_TIME) AS Newest_Record
-FROM TMEASUREMENTS;
+    p.NAME AS Plant_Name,
+    COUNT(meas.MEASUREMENT_ID) AS Total_Measurements,
+    MIN(meas.MEASURE_TIME) AS Oldest_Record,
+    MAX(meas.MEASURE_TIME) AS Newest_Record
+FROM TPLANTS p
+JOIN TSHOPS s ON p.PLANT_ID = s.PLANT_ID
+JOIN TMACHINES m ON s.SHOP_ID = m.SHOP_ID
+JOIN AllMachinePoints pt_link ON m.MACHINE_ID = pt_link.MACHINE_ID
+JOIN TMEASUREMENTS meas ON pt_link.POINT_ID = meas.POINT_ID
+GROUP BY p.NAME
+ORDER BY Total_Measurements DESC;
 
 
--- 4. общее количество прикрепленных файлов осциллограмм (.afdata)
+-- 4. определяет топ-10 самых "проблемных" агрегатов, у которых зафиксировано наибольшее количество событий (тревог, предупреждений, смен состояний)
+SELECT TOP 10
+    m.NAME AS Machine_Name,
+    s.NAME AS Shop_Name,
+    p.NAME AS Plant_Name,
+    COUNT(e.MACHINE_EVENT_ID) AS Event_Count
+FROM TMACHINES m
+JOIN TSHOPS s ON m.SHOP_ID = s.SHOP_ID
+JOIN TPLANTS p ON s.PLANT_ID = p.PLANT_ID
+JOIN TMACHINE_EVENTS e ON m.MACHINE_ID = e.MACHINE_ID
+GROUP BY m.NAME, s.NAME, p.NAME
+ORDER BY Event_Count DESC;
+
+
+-- 5. количество прикрепленных файлов осциллограмм (.afdata)
 SELECT
-    COUNT(*) AS Total_Wave_Files
+    COUNT(FILE_INFO_ID) AS Total_Wave_Files
 FROM TMEASUREMENT_FILES_INFO;
 
 
--- 5. Показывает количество фактически снятых числовых значений вибрации за конкретный год
+-- 6. количество фактически снятых числовых значений вибрации (цифр) за конкретный год (например, за 2024-й)
 SELECT
     COUNT(v.PARAM_VALUE_ID) AS Total_Numeric_Values_2024
 FROM TMEASUREMENTS m
